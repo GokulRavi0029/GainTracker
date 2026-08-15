@@ -23,7 +23,7 @@ button,input,select{font:inherit}.app{max-width:1220px;margin:auto;padding:22px}
 .notice{font-size:11px;color:var(--muted);padding:10px 0}.status{font-size:11px;padding:7px 9px;border-radius:9px;background:var(--soft);display:inline-block}
 .syncbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.syncdot{width:9px;height:9px;border-radius:50%;background:#aab2ad}.syncdot.online{background:var(--good)}.syncdot.warn{background:var(--accent2)}.syncdot.error{background:var(--danger)}.cloudnote{border:1px solid var(--line);background:var(--good-soft);border-radius:14px;padding:12px;font-size:12px;color:#365442}.macro:nth-child(2) .circle{background:conic-gradient(var(--protein) calc(var(--p)*1%),#edf0f3 0)}.macro:nth-child(3) .circle{background:conic-gradient(var(--carb) calc(var(--p)*1%),#edf0f3 0)}.macro:nth-child(4) .circle{background:conic-gradient(var(--fat) calc(var(--p)*1%),#edf0f3 0)}.box.waterbox .bar span{background:var(--water)}.day.haslog{background:#fbfdfb}.day.goodday{background:var(--good-soft);border-color:#cfe1d5}.vizhint{font-size:11px;color:var(--muted);margin-top:6px}
 @media(max-width:900px){.grid{grid-template-columns:1fr}.rings{grid-template-columns:repeat(2,1fr)}} @media(max-width:600px){.app{padding:13px}.meals,.habits,.micros,.formgrid{grid-template-columns:1fr}.calendar{gap:3px}.day{min-height:68px;padding:5px}.nutgrid{grid-template-columns:repeat(2,1fr)}.heroline{flex-direction:column}.top{align-items:flex-start;flex-direction:column}}
-</style>
+.modalback{position:fixed;inset:0;background:rgba(24,31,27,.34);display:none;align-items:center;justify-content:center;padding:16px;z-index:50}.modalback.show{display:flex}.modal{width:min(520px,100%);max-height:90vh;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:20px;padding:18px;box-shadow:0 24px 60px rgba(20,30,24,.18)}.mealitems{margin-top:10px;border-top:1px solid var(--line)}.mealitem{display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid var(--line);cursor:pointer}.mealitem:hover{background:#fafcfa}.editactions{display:flex;gap:8px;justify-content:flex-end;margin-top:14px}</style>
 </head>
 <body><div class="app">
 <div class="top"><div class="brand"><h1>GainTrack</h1><p>Nutrition • muscle gain • daily consistency</p></div><div class="syncbar"><div class="pill"><span class="syncdot" id="syncDot"></span> <span id="syncText">Local only</span></div><div class="pill" id="todayDate"></div></div></div>
@@ -86,243 +86,29 @@ button,input,select{font:inherit}.app{max-width:1220px;margin:auto;padding:22px}
 <div class="notice" id="firebaseStatus">Firebase is not configured yet.</div>
 <div style="margin-top:18px" class="section"><h3>USDA API</h3><span class="small">Food lookup</span></div><div class="small">API KEY</div><input id="apiKey" class="input" type="password" placeholder="DEMO_KEY"/><div class="notice">Stored on this device. Use DEMO_KEY for testing or your free USDA key for regular use.</div><button class="primary" onclick="saveKey()">Save API Key</button>
 <div style="margin-top:18px" class="section"><h3>Backup</h3></div><div class="quick"><button onclick="exportData()">Export JSON</button><label class="btn" style="cursor:pointer">Import JSON<input type="file" accept=".json" onchange="importData(event)" hidden></label></div></div></div></section>
+<div id="editModal" class="modalback" onclick="if(event.target===this)closeEdit()"><div class="modal"><div class="section"><h3 id="editTitle">Edit Food</h3><button class="btn" onclick="closeEdit()">Close</button></div><div class="small">AMOUNT (g)</div><input id="editAmount" class="input" type="number" min="1" oninput="renderEditPreview()"/><div class="small" style="margin-top:10px">MEAL</div><select id="editMeal" class="input"><option>Breakfast</option><option>Snack</option><option>Lunch</option><option>Dinner</option></select><div id="editPreview" class="nutgrid"></div><div id="editMicros" class="micros"></div><div class="editactions"><button class="btn" onclick="deleteEditingFood()">Delete</button><button class="primary" onclick="saveEditingFood()">Save Changes</button></div></div></div>
 </div>
 
 <script>
 const DATE=()=>new Date().toISOString().slice(0,10);
 const rda={calcium:{label:'Calcium',target:1000,unit:'mg'},iron:{label:'Iron',target:8,unit:'mg'},magnesium:{label:'Magnesium',target:420,unit:'mg'},potassium:{label:'Potassium',target:3400,unit:'mg'},zinc:{label:'Zinc',target:11,unit:'mg'},vitd:{label:'Vitamin D',target:20,unit:'µg'},vite:{label:'Vitamin E',target:15,unit:'mg'},vitc:{label:'Vitamin C',target:90,unit:'mg'},folate:{label:'Folate',target:400,unit:'µg'},b12:{label:'Vitamin B12',target:2.4,unit:'µg'}};
-const nutrientMap={
- 'Energy':'cal','Protein':'protein','Carbohydrate, by difference':'carbs','Total lipid (fat)':'fat','Fiber, total dietary':'fiber',
- 'Calcium, Ca':'calcium','Iron, Fe':'iron','Magnesium, Mg':'magnesium','Potassium, K':'potassium','Zinc, Zn':'zinc',
- 'Vitamin D (D2 + D3)':'vitd','Vitamin E (alpha-tocopherol)':'vite','Vitamin C, total ascorbic acid':'vitc','Folate, total':'folate','Vitamin B-12':'b12'
-};
-let state=JSON.parse(localStorage.getItem('gaintrack-v3')||'null')||{
- settings:{cal:2800,protein:145,carbs:330,fat:75,start:68,goal:76,apiKey:'DEMO_KEY'},
- daily:{},logs:[],weights:[{date:DATE(),weight:68}],favorites:[],cachedFoods:[],firebase:{config:{"apiKey":"AIzaSyCruklJAkG8b76nFD43ExIQseM_cXzQ8eo","authDomain":"gaintrack-62d22.firebaseapp.com","projectId":"gaintrack-62d22","storageBucket":"gaintrack-62d22.firebasestorage.app","messagingSenderId":"480467257322","appId":"1:480467257322:web:31ae00c1e97946fd8f5493","measurementId":"G-YEF331BC30"},user:null,lastSync:null}
-};
-if(!state.cachedFoods)state.cachedFoods=[];
-if(!state.firebase)state.firebase={config:null,user:null,lastSync:null};
-const BUILTIN_FIREBASE_CONFIG={"apiKey":"AIzaSyCruklJAkG8b76nFD43ExIQseM_cXzQ8eo","authDomain":"gaintrack-62d22.firebaseapp.com","projectId":"gaintrack-62d22","storageBucket":"gaintrack-62d22.firebasestorage.app","messagingSenderId":"480467257322","appId":"1:480467257322:web:31ae00c1e97946fd8f5493","measurementId":"G-YEF331BC30"};
-if(!state.firebase.config)state.firebase.config=BUILTIN_FIREBASE_CONFIG;
+const nutrientMap={'Energy':'cal','Protein':'protein','Carbohydrate, by difference':'carbs','Total lipid (fat)':'fat','Fiber, total dietary':'fiber','Calcium, Ca':'calcium','Iron, Fe':'iron','Magnesium, Mg':'magnesium','Potassium, K':'potassium','Zinc, Zn':'zinc','Vitamin D (D2 + D3)':'vitd','Vitamin E (alpha-tocopherol)':'vite','Vitamin C, total ascorbic acid':'vitc','Folate, total':'folate','Vitamin B-12':'b12'};
+let state=JSON.parse(localStorage.getItem('gaintrack-v3')||'null')||{settings:{cal:2800,protein:145,carbs:330,fat:75,start:68,goal:76,apiKey:'DEMO_KEY'},daily:{},logs:[],weights:[{date:DATE(),weight:68}],favorites:[],cachedFoods:[],firebase:{config:{"apiKey":"AIzaSyCruklJAkG8b76nFD43ExIQseM_cXzQ8eo","authDomain":"gaintrack-62d22.firebaseapp.com","projectId":"gaintrack-62d22","storageBucket":"gaintrack-62d22.firebasestorage.app","messagingSenderId":"480467257322","appId":"1:480467257322:web:31ae00c1e97946fd8f5493","measurementId":"G-YEF331BC30"},user:null,lastSync:null}};
+if(!state.cachedFoods)state.cachedFoods=[];if(!state.firebase)state.firebase={config:null,user:null,lastSync:null};const BUILTIN_FIREBASE_CONFIG={"apiKey":"AIzaSyCruklJAkG8b76nFD43ExIQseM_cXzQ8eo","authDomain":"gaintrack-62d22.firebaseapp.com","projectId":"gaintrack-62d22","storageBucket":"gaintrack-62d22.firebasestorage.app","messagingSenderId":"480467257322","appId":"1:480467257322:web:31ae00c1e97946fd8f5493","measurementId":"G-YEF331BC30"};if(!state.firebase.config)state.firebase.config=BUILTIN_FIREBASE_CONFIG;
 function dayState(date=DATE()){if(!state.daily[date])state.daily[date]={water:0,veg:0,fruit:0,workout:false,meals:{Breakfast:false,Snack:false,Lunch:false,Dinner:false}};return state.daily[date]}
-let syncTimer=null;
-function save(){localStorage.setItem('gaintrack-v3',JSON.stringify(state));render();if(state.firebase?.user){clearTimeout(syncTimer);syncTimer=setTimeout(()=>{if(fb.user)pushCloud().catch(()=>{})},900)}}
-function openTab(id){document.querySelectorAll('.nav button').forEach(x=>x.classList.toggle('active',x.dataset.tab===id));document.querySelectorAll('.panel').forEach(x=>x.classList.toggle('active',x.id===id));if(id==='calendar')renderCalendar()}
-document.querySelectorAll('.nav button').forEach(b=>b.onclick=()=>openTab(b.dataset.tab));
-function logsFor(date=DATE()){return state.logs.filter(x=>x.date===date)}
-function totals(date=DATE()){let t={cal:0,protein:0,carbs:0,fat:0,fiber:0,mic:{}};Object.keys(rda).forEach(k=>t.mic[k]=0);logsFor(date).forEach(x=>{['cal','protein','carbs','fat','fiber'].forEach(k=>t[k]+=+x[k]||0);Object.keys(t.mic).forEach(k=>t.mic[k]+=+(x.mic?.[k]||0))});return t}
-function pct(v,g){return Math.min(100,Math.round((v||0)/(g||1)*100))}
-function render(){
- todayDate.textContent=new Date().toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'});
- let s=state.settings,d=dayState(),t=totals(),cw=state.weights.at(-1)?.weight||s.start;cwEl=document.getElementById('cw');cwEl.textContent=cw.toFixed(1);gw.textContent=s.goal;sw.textContent=s.start;remaining.textContent=Math.max(0,s.goal-cw).toFixed(1)+' kg remaining';wbar.style.width=Math.max(0,Math.min(100,(cw-s.start)/(s.goal-s.start)*100))+'%';
- let macros=[['Calories',t.cal,s.cal,'kcal'],['Protein',t.protein,s.protein,'g'],['Carbs',t.carbs,s.carbs,'g'],['Fat',t.fat,s.fat,'g']];
- macroRings.innerHTML=macros.map(([n,v,g,u])=>`<div class="macro"><div class="circle" style="--p:${pct(v,g)}"><b>${pct(v,g)}%</b></div><strong>${n}</strong><small>${Math.round(v)} / ${g} ${u}</small></div>`).join('');
- mealCards.innerHTML=['Breakfast','Snack','Lunch','Dinner'].map(m=>{let l=logsFor().filter(x=>x.meal===m),c=l.reduce((a,b)=>a+b.cal,0),p=l.reduce((a,b)=>a+b.protein,0);return `<div class="meal"><div class="mealhead"><b>${m}</b><div class="tick ${d.meals[m]?'done':''}" onclick="toggleMeal('${m}')">${d.meals[m]?'✓':''}</div></div><p>${Math.round(c)} kcal • ${Math.round(p)}g protein • ${l.length} item${l.length===1?'':'s'}</p><button onclick="openTab('food');mealInput.value='${m}'">+ Add Food</button></div>`}).join('');
- water.textContent=d.water.toFixed(1);veg.textContent=d.veg;fruit.textContent=d.fruit;workout.textContent=d.workout?'Completed':'Not done';waterbar.style.width=pct(d.water,3)+'%';vegbar.style.width=pct(d.veg,4)+'%';fruitbar.style.width=pct(d.fruit,3)+'%';workbar.style.width=d.workout?'100%':'0%';
- microGrid.innerHTML=Object.entries(rda).map(([k,x])=>`<div class="box"><strong>${pct(t.mic[k],x.target)}%</strong><span>${x.label} • ${fmt(t.mic[k])}/${x.target} ${x.unit}</span><div class="bar"><span style="width:${pct(t.mic[k],x.target)}%"></span></div></div>`).join('');
- todayLog.innerHTML=logsFor().length?logsFor().slice().reverse().map(x=>`<div class="logrow"><span><b>${x.name}</b><br><span class="muted">${x.meal} • ${x.amount?fmt(x.amount)+'g':''}</span></span><span>${Math.round(x.cal)} kcal • ${fmt(x.protein)}g P <button class="danger" onclick="deleteLog('${x.id}')">×</button></span></div>`).join(''):'<div class="muted small">No food logged today.</div>';
- renderFavorites();renderProgress();fillSettings()
-}
-function habit(k,v){let d=dayState();d[k]+=v;save()} function toggleWorkout(){let d=dayState();d.workout=!d.workout;save()} function toggleMeal(m){let d=dayState();d.meals[m]=!d.meals[m];save()} function deleteLog(id){state.logs=state.logs.filter(x=>String(x.id)!==String(id));save()}
-function fmt(n){return (+n||0).toFixed((+n||0)<10?1:0)}
-let selected=null, searchCache=[];
-async function searchFood(){
- let q=searchInput.value.trim();if(!q)return;
- let local=state.cachedFoods.filter(f=>f.name.toLowerCase().includes(q.toLowerCase()));
- searchStatus.innerHTML=local.length?`<span class="status">${local.length} saved food${local.length===1?'':'s'} found locally • checking USDA for more…</span>`:'<span class="status">Searching USDA…</span>';
- searchResults.innerHTML=local.map((f,i)=>`<div class="result cached" onclick="selectCached(${i})"><b>${esc(f.name)} <span class="cachedtag">SAVED • NO LOOKUP</span></b><span>Previously used • nutrition stored on this device • ${Math.round(f.cal)} kcal / 100g</span></div>`).join('');
- try{
-  let key=state.settings.apiKey||'DEMO_KEY';
-  let url=`https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${encodeURIComponent(key)}&query=${encodeURIComponent(q)}&pageSize=12`;
-  let r=await fetch(url);if(!r.ok)throw new Error('USDA request failed ('+r.status+')');let data=await r.json();searchCache=data.foods||[];
-  let usda=searchCache.map((f,i)=>{let cached=state.cachedFoods.some(c=>String(c.fdcId)===String(f.fdcId));return `<div class="result ${cached?'cached':''}" onclick="${cached?`selectCachedByFdc('${f.fdcId}')`:`selectFood(${i})`}"><b>${esc(f.description||'Food')} ${cached?'<span class="cachedtag">SAVED • NO LOOKUP</span>':''}</b><span>${esc(f.dataType||'')} ${f.brandOwner?'• '+esc(f.brandOwner):''} • FDC ${f.fdcId}</span></div>`}).join('');
-  searchResults.innerHTML=(local.length?searchResults.innerHTML:'')+usda || '<div class="muted">No foods found.</div>';
-  searchStatus.innerHTML=local.length?'<span class="status">Green results are already saved on this device — click them without another nutrient lookup.</span>':'';
- }catch(e){
-  if(local.length) searchStatus.innerHTML='<span class="status">Showing saved foods only. USDA is unavailable right now.</span>';
-  else searchStatus.innerHTML=`<span class="status">Could not search: ${esc(e.message)}. Check your API key/network.</span>`;
- }
-}
-function selectCached(i){selected=state.cachedFoods.filter(f=>f.name.toLowerCase().includes(searchInput.value.trim().toLowerCase()))[i];foodDetail.classList.add('show');searchStatus.innerHTML='<span class="status">Loaded from your saved food library • no USDA request used.</span>';renderSelected()}
-function selectCachedByFdc(id){selected=state.cachedFoods.find(f=>String(f.fdcId)===String(id));if(!selected)return;foodDetail.classList.add('show');searchStatus.innerHTML='<span class="status">Loaded from your saved food library • no USDA request used.</span>';renderSelected()}
-function normalizedFood(f){
- let out={fdcId:f.fdcId,name:f.description||'Food',cal:0,protein:0,carbs:0,fat:0,fiber:0,mic:{}};Object.keys(rda).forEach(k=>out.mic[k]=0);
- (f.foodNutrients||[]).forEach(n=>{let name=n.nutrientName||n.nutrient?.name,val=n.value??n.amount??0,key=nutrientMap[name];if(!key)return;if(['cal','protein','carbs','fat','fiber'].includes(key))out[key]=+val||0;else out.mic[key]=+val||0});
- return out
-}
-async function selectFood(i){
- let f=searchCache[i]; searchStatus.innerHTML='<span class="status">Loading nutrients…</span>';
- try{let key=state.settings.apiKey||'DEMO_KEY',r=await fetch(`https://api.nal.usda.gov/fdc/v1/food/${f.fdcId}?api_key=${encodeURIComponent(key)}`);if(!r.ok)throw new Error('details failed');let full=await r.json();selected=normalizedFood(full);searchStatus.innerHTML='';foodDetail.classList.add('show');renderSelected()}
- catch(e){selected=normalizedFood(f);searchStatus.innerHTML='<span class="status">Using search-result nutrient data.</span>';foodDetail.classList.add('show');renderSelected()}
-}
-function scaled(x,amt){let factor=amt/100,o={...x,mic:{}};['cal','protein','carbs','fat','fiber'].forEach(k=>o[k]=(x[k]||0)*factor);Object.keys(rda).forEach(k=>o.mic[k]=(x.mic?.[k]||0)*factor);return o}
-function renderSelected(){if(!selected)return;let a=+amountInput.value||100,x=scaled(selected,a);selectedName.textContent=selected.name;selectedMacros.innerHTML=[['Calories',x.cal,'kcal'],['Protein',x.protein,'g'],['Carbs',x.carbs,'g'],['Fat',x.fat,'g'],['Fiber',x.fiber,'g']].map(z=>`<div class="nut"><b>${fmt(z[1])} ${z[2]}</b><span>${z[0]}</span></div>`).join('');selectedMicros.innerHTML=Object.entries(rda).map(([k,v])=>`<div class="box"><strong>${fmt(x.mic[k])} ${v.unit}</strong><span>${v.label} • ${pct(x.mic[k],v.target)}% DV target</span></div>`).join('')}
-function addSelectedFood(){if(!selected)return;let amt=+amountInput.value||100,x=scaled(selected,amt);state.logs.push({...x,name:selected.name,fdcId:selected.fdcId,amount:amt,meal:mealInput.value,date:DATE(),id:Date.now()});if(!state.cachedFoods.some(f=>String(f.fdcId)===String(selected.fdcId)))state.cachedFoods.push(JSON.parse(JSON.stringify(selected)));save();openTab('today')}
-function saveFavorite(){if(!selected)return;if(!state.favorites.some(x=>x.fdcId===selected.fdcId))state.favorites.push(selected);save()}
-function renderFavorites(){
- let html=state.favorites.length?state.favorites.map((f,i)=>`<div class="favrow"><span><b>${esc(f.name)}</b><br><span class="muted small">per 100g • ${Math.round(f.cal)} kcal • ${fmt(f.protein)}g protein</span></span><span><button class="btn" onclick="useFavorite(${i})">Add</button> <button class="danger" onclick="removeFavorite(${i})">Remove</button></span></div>`).join(''):'<div class="muted small">No favorites saved yet.</div>';
- favoriteList.innerHTML=html;favoriteQuick.innerHTML=html;
-}
-function useFavorite(i){selected=state.favorites[i];foodDetail.classList.add('show');selectedName.textContent=selected.name;amountInput.value=100;renderSelected();openTab('food');foodDetail.scrollIntoView({behavior:'smooth'})}
-function removeFavorite(i){state.favorites.splice(i,1);save()}
-let calCursor=new Date();calCursor.setDate(1);
-function changeMonth(n){calCursor.setMonth(calCursor.getMonth()+n);renderCalendar()}
-function renderCalendar(){
- let y=calCursor.getFullYear(),m=calCursor.getMonth(),first=new Date(y,m,1),days=new Date(y,m+1,0).getDate(),offset=(first.getDay()+6)%7;monthTitle.textContent=first.toLocaleDateString(undefined,{month:'long',year:'numeric'});
- let cells=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(x=>`<div class="dow">${x}</div>`);for(let i=0;i<offset;i++)cells.push('<div class="day blank"></div>');
- for(let d=1;d<=days;d++){let ds=`${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`,t=totals(ds),h=state.daily[ds]||{},has=logsFor(ds).length>0,prot=pct(t.protein,state.settings.protein),cal=pct(t.cal,state.settings.cal),habitDone=(h.workout?1:0)+(h.water>=3?1:0)+(h.veg>=4?1:0)+(h.fruit>=3?1:0);cells.push(`<div class="day ${ds===DATE()?'today':''} ${has?'haslog':''} ${(prot>=90&&cal>=90&&cal<=110)?'goodday':''}" onclick="showDay('${ds}')"><div class="daynum">${d}</div><div class="dotrow"><i class="dot ${has?'on':''}"></i><i class="dot ${prot>=90?'on':''}"></i><i class="dot ${cal>=90&&cal<=110?'on':''}"></i><i class="dot ${habitDone>=3?'on':''}"></i></div><small>${has?Math.round(t.cal)+' kcal':'No log'}</small></div>`)}
- calendarGrid.innerHTML=cells.join('')
-}
-function showDay(ds){let t=totals(ds),l=logsFor(ds),h=state.daily[ds]||{};dayDetail.innerHTML=`<div class="card" style="box-shadow:none"><div class="section"><h3>${new Date(ds+'T12:00:00').toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'})}</h3><span class="small">${l.length} foods</span></div><div class="habits"><div class="box"><strong>${Math.round(t.cal)}</strong><span>Calories</span></div><div class="box"><strong>${Math.round(t.protein)}g</strong><span>Protein</span></div><div class="box"><strong>${fmt(h.water||0)}L</strong><span>Water</span></div><div class="box"><strong>${h.workout?'Yes':'No'}</strong><span>Workout</span></div></div><div style="margin-top:10px">${l.map(x=>`<div class="logrow"><span>${esc(x.name)}</span><span>${Math.round(x.cal)} kcal • ${fmt(x.protein)}g P</span></div>`).join('')||'<div class="muted small">No food entries.</div>'}</div></div>`}
-function addWeight(){let w=+weightInput.value;if(!w)return;state.weights.push({date:DATE(),weight:w});save()}
-function renderProgress(){weightLog.innerHTML=state.weights.slice().reverse().map(w=>`<div class="logrow"><span>${w.date}</span><b>${(+w.weight).toFixed(1)} kg</b></div>`).join('');let dates=[...new Set(state.logs.map(x=>x.date))].sort().slice(-7),ts=dates.map(d=>totals(d));avgCal.textContent=dates.length?Math.round(ts.reduce((a,b)=>a+b.cal,0)/dates.length):0;avgPro.textContent=dates.length?Math.round(ts.reduce((a,b)=>a+b.protein,0)/dates.length)+'g':'0g';daysLogged.textContent=dates.length;if(state.weights.length>1){let a=state.weights[0],b=state.weights.at(-1),days=Math.max(1,(new Date(b.date)-new Date(a.date))/86400000),p=(b.weight-a.weight)/days*7;weekPace.textContent=(p>=0?'+':'')+p.toFixed(2)+' kg/wk';paceStatus.textContent=p>=.15&&p<=.30?'On target pace':p<.15?'Below target pace':'Above target pace'}else{weekPace.textContent='—';paceStatus.textContent='Build consistency first'}}
-function fillSettings(){let s=state.settings;setCal.value=s.cal;setPro.value=s.protein;setCarbs.value=s.carbs;setFat.value=s.fat;setStart.value=s.start;setGoal.value=s.goal;apiKey.value=s.apiKey||'DEMO_KEY';firebaseConfigInput.value=state.firebase.config?JSON.stringify(state.firebase.config,null,2):'';updateSyncUI()}
-function saveTargets(){Object.assign(state.settings,{cal:+setCal.value,protein:+setPro.value,carbs:+setCarbs.value,fat:+setFat.value,start:+setStart.value,goal:+setGoal.value});save()}
-function saveKey(){state.settings.apiKey=apiKey.value.trim()||'DEMO_KEY';save()}
-function exportData(){let b=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='gaintrack-backup-'+DATE()+'.json';a.click();URL.revokeObjectURL(a.href)}
-function importData(e){let f=e.target.files[0];if(!f)return;let r=new FileReader();r.onload=()=>{try{state=JSON.parse(r.result);save();alert('Backup imported')}catch{alert('Invalid GainTrack backup')}};r.readAsText(f)}
-function esc(s){return String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
-searchInput.addEventListener('keydown',e=>{if(e.key==='Enter')searchFood()});
-
-let fb={app:null,auth:null,db:null,mods:null,user:null};
-
-function updateSyncUI(msg){
- const configured=!!state.firebase.config;
- const signed=!!state.firebase.user;
- syncDot.className='syncdot '+(signed?'online':configured?'warn':'');
- syncText.textContent=signed?'Cloud synced':configured?'Firebase ready':'Local only';
- firebaseStatus.textContent=msg || (signed?`Signed in as ${state.firebase.user.email||'user'}${state.firebase.lastSync?' • Last sync '+new Date(state.firebase.lastSync).toLocaleString():''}`:configured?'Firebase configured. Sign in to start cross-device sync.':'GainTrack Firebase project is configured. Google Sign-In and Firestore are ready.');
-}
-
-async function loadFirebaseModules(){
- if(fb.mods)return fb.mods;
- fb.mods = await Promise.all([
-  import('https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js'),
-  import('https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js'),
-  import('https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js')
- ]);
- return fb.mods;
-}
-
-async function initFirebase(){
- if(!state.firebase.config)return false;
- try{
-  const [appM,authM,fsM]=await loadFirebaseModules();
-  if(!fb.app){
-    fb.app=appM.initializeApp(state.firebase.config);
-    fb.auth=authM.getAuth(fb.app);
-    fb.db=fsM.initializeFirestore(fb.app,{localCache:fsM.persistentLocalCache({tabManager:fsM.persistentMultipleTabManager()})});
-    authM.onAuthStateChanged(fb.auth,user=>{
-      fb.user=user||null;
-      state.firebase.user=user?{uid:user.uid,email:user.email}:null;
-      localStorage.setItem('gaintrack-v3',JSON.stringify(state));
-      updateSyncUI();
-      if(user) pullCloud();
-    });
-  }
-  return true;
- }catch(e){
-  syncDot.className='syncdot error';
-  updateSyncUI('Firebase error: '+e.message);
-  return false;
- }
-}
-
-function saveFirebaseConfig(){
- try{
-  const cfg=JSON.parse(firebaseConfigInput.value.trim());
-  if(!cfg.apiKey||!cfg.projectId||!cfg.appId)throw new Error('apiKey, projectId and appId are required');
-  state.firebase.config=cfg;
-  localStorage.setItem('gaintrack-v3',JSON.stringify(state));
-  updateSyncUI('Firebase config saved. Reload the page once, then create an account or sign in.');
-  alert('Firebase config saved. Reload GainTrack once before signing in.');
- }catch(e){firebaseStatus.textContent='Invalid config: '+e.message}
-}
-
-async function firebaseSignUp(){
- if(!await initFirebase())return;
- try{
-  const [,authM]=fb.mods;
-  throw new Error('Email/password sign-up disabled in this build');
- }catch(e){updateSyncUI('Sign-up failed: '+e.message)}
-}
-
-async function firebaseSignIn(){
- if(!await initFirebase())return;
- try{
-  const [,authM]=fb.mods;
-  throw new Error('Email/password sign-in disabled in this build');
- }catch(e){updateSyncUI('Sign-in failed: '+e.message)}
-}
-
-async function firebaseGoogleSignIn(){
- if(!await initFirebase())return;
- try{
-  const [,authM]=fb.mods;
-  const provider=new authM.GoogleAuthProvider();
-  provider.setCustomParameters({prompt:'select_account'});
-  await authM.signInWithPopup(fb.auth,provider);
-  updateSyncUI('Signed in with Google. Loading your cloud data…');
- }catch(e){
-  if(e.code==='auth/popup-blocked'||e.code==='auth/cancelled-popup-request'){
-    try{
-      const [,authM]=fb.mods;
-      const provider=new authM.GoogleAuthProvider();
-      provider.setCustomParameters({prompt:'select_account'});
-      await authM.signInWithRedirect(fb.auth,provider);
-    }catch(err){updateSyncUI('Google sign-in failed: '+err.message)}
-  }else{
-    updateSyncUI('Google sign-in failed: '+e.message)
-  }
- }
-}
-
-async function firebaseSignOut(){
- if(!await initFirebase())return;
- try{
-  const [,authM]=fb.mods;
-  await authM.signOut(fb.auth);
-  state.firebase.user=null;localStorage.setItem('gaintrack-v3',JSON.stringify(state));updateSyncUI('Signed out. Local tracking continues.');
- }catch(e){updateSyncUI('Sign-out failed: '+e.message)}
-}
-
-async function pushCloud(){
- if(!fb.user||!fb.db)return;
- const fsM=fb.mods[2];
- const cloudData=JSON.parse(JSON.stringify(state));
- delete cloudData.firebase.config;
- cloudData.firebase={user:{uid:fb.user.uid,email:fb.user.email},lastSync:Date.now()};
- await fsM.setDoc(fsM.doc(fb.db,'users',fb.user.uid,'gaintrack','state'),cloudData,{merge:false});
- state.firebase.lastSync=Date.now();
- localStorage.setItem('gaintrack-v3',JSON.stringify(state));
- updateSyncUI('Cloud sync complete.');
-}
-
-async function pullCloud(){
- if(!fb.user||!fb.db)return;
- try{
-  const fsM=fb.mods[2];
-  const snap=await fsM.getDoc(fsM.doc(fb.db,'users',fb.user.uid,'gaintrack','state'));
-  if(snap.exists()){
-    const cloud=snap.data();
-    const cfg=state.firebase.config;
-    state={...cloud,firebase:{...(cloud.firebase||{}),config:cfg,user:{uid:fb.user.uid,email:fb.user.email},lastSync:Date.now()}};
-    if(!state.cachedFoods)state.cachedFoods=[];
-    localStorage.setItem('gaintrack-v3',JSON.stringify(state));render();renderCalendar();
-    updateSyncUI('Cloud data loaded.');
-  }else{
-    await pushCloud();
-  }
- }catch(e){updateSyncUI('Cloud load failed: '+e.message)}
-}
-
-async function syncNow(){
- if(!await initFirebase())return;
- if(!fb.user){updateSyncUI('Sign in first to sync.');return}
- try{await pushCloud()}catch(e){updateSyncUI('Sync failed: '+e.message)}
-}
-
-window.addEventListener('online',()=>{if(state.firebase.user)syncNow()});
-
-render();renderCalendar();if(state.firebase.config)initFirebase();
+let syncTimer=null;function save(){localStorage.setItem('gaintrack-v3',JSON.stringify(state));render();if(state.firebase?.user){clearTimeout(syncTimer);syncTimer=setTimeout(()=>{if(fb.user)pushCloud().catch(()=>{})},900)}}
+function openTab(id){document.querySelectorAll('.nav button').forEach(x=>x.classList.toggle('active',x.dataset.tab===id));document.querySelectorAll('.panel').forEach(x=>x.classList.toggle('active',x.id===id));if(id==='calendar')renderCalendar()}document.querySelectorAll('.nav button').forEach(b=>b.onclick=()=>openTab(b.dataset.tab));
+function logsFor(date=DATE()){return state.logs.filter(x=>x.date===date)}function totals(date=DATE()){let t={cal:0,protein:0,carbs:0,fat:0,fiber:0,mic:{}};Object.keys(rda).forEach(k=>t.mic[k]=0);logsFor(date).forEach(x=>{['cal','protein','carbs','fat','fiber'].forEach(k=>t[k]+=+x[k]||0);Object.keys(t.mic).forEach(k=>t.mic[k]+=+(x.mic?.[k]||0))});return t}function pct(v,g){return Math.min(100,Math.round((v||0)/(g||1)*100))}
+function render(){todayDate.textContent=new Date().toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'});let s=state.settings,d=dayState(),t=totals(),cw=state.weights.at(-1)?.weight||s.start;cwEl=document.getElementById('cw');cwEl.textContent=cw.toFixed(1);gw.textContent=s.goal;sw.textContent=s.start;remaining.textContent=Math.max(0,s.goal-cw).toFixed(1)+' kg remaining';wbar.style.width=Math.max(0,Math.min(100,(cw-s.start)/(s.goal-s.start)*100))+'%';let macros=[['Calories',t.cal,s.cal,'kcal'],['Protein',t.protein,s.protein,'g'],['Carbs',t.carbs,s.carbs,'g'],['Fat',t.fat,s.fat,'g']];macroRings.innerHTML=macros.map(([n,v,g,u])=>`<div class="macro"><div class="circle" style="--p:${pct(v,g)}"><b>${pct(v,g)}%</b></div><strong>${n}</strong><small>${Math.round(v)} / ${g} ${u}</small></div>`).join('');mealCards.innerHTML=['Breakfast','Snack','Lunch','Dinner'].map(m=>{let l=logsFor().filter(x=>x.meal===m),c=l.reduce((a,b)=>a+b.cal,0),p=l.reduce((a,b)=>a+b.protein,0);let items=l.length?`<div class="mealitems">${l.map(x=>`<div class="mealitem" onclick="editFood('${x.id}')"><span><b>${esc(x.name)}</b><br><span class="muted">${x.amount?fmt(x.amount)+'g':''}</span></span><span>${Math.round(x.cal)} kcal • ${fmt(x.protein)}g P</span></div>`).join('')}</div>`:'<div class="muted small" style="margin-top:8px">No foods yet</div>';return `<div class="meal"><div class="mealhead"><b>${m}</b><div class="tick ${d.meals[m]?'done':''}" onclick="event.stopPropagation();toggleMeal('${m}')">${d.meals[m]?'✓':''}</div></div><p>${Math.round(c)} kcal • ${Math.round(p)}g protein • ${l.length} item${l.length===1?'':'s'}</p>${items}<button onclick="openTab('food');mealInput.value='${m}'">+ Add Food</button></div>`}).join('');water.textContent=d.water.toFixed(1);veg.textContent=d.veg;fruit.textContent=d.fruit;workout.textContent=d.workout?'Completed':'Not done';waterbar.style.width=pct(d.water,3)+'%';vegbar.style.width=pct(d.veg,4)+'%';fruitbar.style.width=pct(d.fruit,3)+'%';workbar.style.width=d.workout?'100%':'0%';microGrid.innerHTML=Object.entries(rda).map(([k,x])=>`<div class="box"><strong>${pct(t.mic[k],x.target)}%</strong><span>${x.label} • ${fmt(t.mic[k])}/${x.target} ${x.unit}</span><div class="bar"><span style="width:${pct(t.mic[k],x.target)}%"></span></div></div>`).join('');todayLog.innerHTML=logsFor().length?logsFor().slice().reverse().map(x=>`<div class="logrow" style="cursor:pointer" onclick="editFood('${x.id}')"><span><b>${x.name}</b><br><span class="muted">${x.meal} • ${x.amount?fmt(x.amount)+'g':''}</span></span><span>${Math.round(x.cal)} kcal • ${fmt(x.protein)}g P <button class="btn" onclick="event.stopPropagation();editFood('${x.id}')">Edit</button></span></div>`).join(''):'<div class="muted small">No food logged today.</div>';renderFavorites();renderProgress();fillSettings()}
+function habit(k,v){let d=dayState();d[k]+=v;save()}function toggleWorkout(){let d=dayState();d.workout=!d.workout;save()}function toggleMeal(m){let d=dayState();d.meals[m]=!d.meals[m];save()}function deleteLog(id){state.logs=state.logs.filter(x=>String(x.id)!==String(id));save()}function fmt(n){return (+n||0).toFixed((+n||0)<10?1:0)}
+let selected=null,searchCache=[];async function searchFood(){let q=searchInput.value.trim();if(!q)return;let local=state.cachedFoods.filter(f=>f.name.toLowerCase().includes(q.toLowerCase()));searchStatus.innerHTML=local.length?`<span class="status">${local.length} saved food${local.length===1?'':'s'} found locally • checking USDA for more…</span>`:'<span class="status">Searching USDA…</span>';searchResults.innerHTML=local.map((f,i)=>`<div class="result cached" onclick="selectCached(${i})"><b>${esc(f.name)} <span class="cachedtag">SAVED • NO LOOKUP</span></b><span>Previously used • nutrition stored on this device • ${Math.round(f.cal)} kcal / 100g</span></div>`).join('');try{let key=state.settings.apiKey||'DEMO_KEY';let url=`https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${encodeURIComponent(key)}&query=${encodeURIComponent(q)}&pageSize=12`;let r=await fetch(url);if(!r.ok)throw new Error('USDA request failed ('+r.status+')');let data=await r.json();searchCache=data.foods||[];let usda=searchCache.map((f,i)=>{let cached=state.cachedFoods.some(c=>String(c.fdcId)===String(f.fdcId));return `<div class="result ${cached?'cached':''}" onclick="${cached?`selectCachedByFdc('${f.fdcId}')`:`selectFood(${i})`}"><b>${esc(f.description||'Food')} ${cached?'<span class="cachedtag">SAVED • NO LOOKUP</span>':''}</b><span>${esc(f.dataType||'')} ${f.brandOwner?'• '+esc(f.brandOwner):''} • FDC ${f.fdcId}</span></div>`}).join('');searchResults.innerHTML=(local.length?searchResults.innerHTML:'')+usda||'<div class="muted">No foods found.</div>';searchStatus.innerHTML=local.length?'<span class="status">Green results are already saved on this device — click them without another nutrient lookup.</span>':''}catch(e){if(local.length)searchStatus.innerHTML='<span class="status">Showing saved foods only. USDA is unavailable right now.</span>';else searchStatus.innerHTML=`<span class="status">Could not search: ${esc(e.message)}. Check your API key/network.</span>`}}
+function selectCached(i){selected=state.cachedFoods.filter(f=>f.name.toLowerCase().includes(searchInput.value.trim().toLowerCase()))[i];foodDetail.classList.add('show');searchStatus.innerHTML='<span class="status">Loaded from your saved food library • no USDA request used.</span>';renderSelected()}function selectCachedByFdc(id){selected=state.cachedFoods.find(f=>String(f.fdcId)===String(id));if(!selected)return;foodDetail.classList.add('show');searchStatus.innerHTML='<span class="status">Loaded from your saved food library • no USDA request used.</span>';renderSelected()}function normalizedFood(f){let out={fdcId:f.fdcId,name:f.description||'Food',cal:0,protein:0,carbs:0,fat:0,fiber:0,mic:{}};Object.keys(rda).forEach(k=>out.mic[k]=0);(f.foodNutrients||[]).forEach(n=>{let name=n.nutrientName||n.nutrient?.name,val=n.value??n.amount??0,key=nutrientMap[name];if(!key)return;if(['cal','protein','carbs','fat','fiber'].includes(key))out[key]=+val||0;else out.mic[key]=+val||0});return out}
+async function selectFood(i){let f=searchCache[i];searchStatus.innerHTML='<span class="status">Loading nutrients…</span>';try{let key=state.settings.apiKey||'DEMO_KEY',r=await fetch(`https://api.nal.usda.gov/fdc/v1/food/${f.fdcId}?api_key=${encodeURIComponent(key)}`);if(!r.ok)throw new Error('details failed');let full=await r.json();selected=normalizedFood(full);searchStatus.innerHTML='';foodDetail.classList.add('show');renderSelected()}catch(e){selected=normalizedFood(f);searchStatus.innerHTML='<span class="status">Using search-result nutrient data.</span>';foodDetail.classList.add('show');renderSelected()}}
+function scaled(x,amt){let factor=amt/100,o={...x,mic:{}};['cal','protein','carbs','fat','fiber'].forEach(k=>o[k]=(x[k]||0)*factor);Object.keys(rda).forEach(k=>o.mic[k]=(x.mic?.[k]||0)*factor);return o}function renderSelected(){if(!selected)return;let a=+amountInput.value||100,x=scaled(selected,a);selectedName.textContent=selected.name;selectedMacros.innerHTML=[['Calories',x.cal,'kcal'],['Protein',x.protein,'g'],['Carbs',x.carbs,'g'],['Fat',x.fat,'g'],['Fiber',x.fiber,'g']].map(z=>`<div class="nut"><b>${fmt(z[1])} ${z[2]}</b><span>${z[0]}</span></div>`).join('');selectedMicros.innerHTML=Object.entries(rda).map(([k,v])=>`<div class="box"><strong>${fmt(x.mic[k])} ${v.unit}</strong><span>${v.label} • ${pct(x.mic[k],v.target)}% DV target</span></div>`).join('')}function addSelectedFood(){if(!selected)return;let amt=+amountInput.value||100,x=scaled(selected,amt);state.logs.push({...x,name:selected.name,fdcId:selected.fdcId,amount:amt,meal:mealInput.value,date:DATE(),id:Date.now()});if(!state.cachedFoods.some(f=>String(f.fdcId)===String(selected.fdcId)))state.cachedFoods.push(JSON.parse(JSON.stringify(selected)));save();openTab('today')}function saveFavorite(){if(!selected)return;if(!state.favorites.some(x=>x.fdcId===selected.fdcId))state.favorites.push(selected);save()}
+function renderFavorites(){let html=state.favorites.length?state.favorites.map((f,i)=>`<div class="favrow"><span><b>${esc(f.name)}</b><br><span class="muted small">per 100g • ${Math.round(f.cal)} kcal • ${fmt(f.protein)}g protein</span></span><span><button class="btn" onclick="useFavorite(${i})">Add</button> <button class="danger" onclick="removeFavorite(${i})">Remove</button></span></div>`).join(''):'<div class="muted small">No favorites saved yet.</div>';favoriteList.innerHTML=html;favoriteQuick.innerHTML=html}function useFavorite(i){selected=state.favorites[i];foodDetail.classList.add('show');selectedName.textContent=selected.name;amountInput.value=100;renderSelected();openTab('food');foodDetail.scrollIntoView({behavior:'smooth'})}function removeFavorite(i){state.favorites.splice(i,1);save()}
+let calCursor=new Date();calCursor.setDate(1);function changeMonth(n){calCursor.setMonth(calCursor.getMonth()+n);renderCalendar()}function renderCalendar(){let y=calCursor.getFullYear(),m=calCursor.getMonth(),first=new Date(y,m,1),days=new Date(y,m+1,0).getDate(),offset=(first.getDay()+6)%7;monthTitle.textContent=first.toLocaleDateString(undefined,{month:'long',year:'numeric'});let cells=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(x=>`<div class="dow">${x}</div>`);for(let i=0;i<offset;i++)cells.push('<div class="day blank"></div>');for(let d=1;d<=days;d++){let ds=`${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`,t=totals(ds),h=state.daily[ds]||{},has=logsFor(ds).length>0,prot=pct(t.protein,state.settings.protein),cal=pct(t.cal,state.settings.cal),habitDone=(h.workout?1:0)+(h.water>=3?1:0)+(h.veg>=4?1:0)+(h.fruit>=3?1:0);cells.push(`<div class="day ${ds===DATE()?'today':''} ${has?'haslog':''} ${(prot>=90&&cal>=90&&cal<=110)?'goodday':''}" onclick="showDay('${ds}')"><div class="daynum">${d}</div><div class="dotrow"><i class="dot ${has?'on':''}"></i><i class="dot ${prot>=90?'on':''}"></i><i class="dot ${cal>=90&&cal<=110?'on':''}"></i><i class="dot ${habitDone>=3?'on':''}"></i></div><small>${has?Math.round(t.cal)+' kcal':'No log'}</small></div>`)}calendarGrid.innerHTML=cells.join('')}function showDay(ds){let t=totals(ds),l=logsFor(ds),h=state.daily[ds]||{};dayDetail.innerHTML=`<div class="card" style="box-shadow:none"><div class="section"><h3>${new Date(ds+'T12:00:00').toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'})}</h3><span class="small">${l.length} foods</span></div><div class="habits"><div class="box"><strong>${Math.round(t.cal)}</strong><span>Calories</span></div><div class="box"><strong>${Math.round(t.protein)}g</strong><span>Protein</span></div><div class="box"><strong>${fmt(h.water||0)}L</strong><span>Water</span></div><div class="box"><strong>${h.workout?'Yes':'No'}</strong><span>Workout</span></div></div><div style="margin-top:10px">${l.map(x=>`<div class="logrow"><span>${esc(x.name)}</span><span>${Math.round(x.cal)} kcal • ${fmt(x.protein)}g P</span></div>`).join('')||'<div class="muted small">No food entries.</div>'}</div></div>`}
+let editingId=null;function editFood(id){const item=state.logs.find(x=>String(x.id)===String(id));if(!item)return;editingId=id;editTitle.textContent=item.name;editAmount.value=item.amount||100;editMeal.value=item.meal||'Snack';editModal.classList.add('show');renderEditPreview()}function closeEdit(){editingId=null;editModal.classList.remove('show')}function renderEditPreview(){const item=state.logs.find(x=>String(x.id)===String(editingId));if(!item)return;const base=state.cachedFoods.find(f=>String(f.fdcId)===String(item.fdcId))||null;let preview=item;if(base)preview=scaled(base,+editAmount.value||item.amount||100);editPreview.innerHTML=[['Calories',preview.cal,'kcal'],['Protein',preview.protein,'g'],['Carbs',preview.carbs,'g'],['Fat',preview.fat,'g'],['Fiber',preview.fiber,'g']].map(z=>`<div class="nut"><b>${fmt(z[1])} ${z[2]}</b><span>${z[0]}</span></div>`).join('');editMicros.innerHTML=Object.entries(rda).map(([k,v])=>`<div class="box"><strong>${fmt(preview.mic?.[k]||0)} ${v.unit}</strong><span>${v.label}</span></div>`).join('')}function saveEditingFood(){const i=state.logs.findIndex(x=>String(x.id)===String(editingId));if(i<0)return;const item=state.logs[i],base=state.cachedFoods.find(f=>String(f.fdcId)===String(item.fdcId));if(base){const x=scaled(base,+editAmount.value||item.amount||100);state.logs[i]={...item,...x,amount:+editAmount.value||item.amount||100,meal:editMeal.value}}else{state.logs[i]={...item,amount:+editAmount.value||item.amount||100,meal:editMeal.value}}closeEdit();save()}function deleteEditingFood(){if(editingId==null)return;state.logs=state.logs.filter(x=>String(x.id)!==String(editingId));closeEdit();save()}
+function addWeight(){let w=+weightInput.value;if(!w)return;state.weights.push({date:DATE(),weight:w});save()}function renderProgress(){weightLog.innerHTML=state.weights.slice().reverse().map(w=>`<div class="logrow"><span>${w.date}</span><b>${(+w.weight).toFixed(1)} kg</b></div>`).join('');let dates=[...new Set(state.logs.map(x=>x.date))].sort().slice(-7),ts=dates.map(d=>totals(d));avgCal.textContent=dates.length?Math.round(ts.reduce((a,b)=>a+b.cal,0)/dates.length):0;avgPro.textContent=dates.length?Math.round(ts.reduce((a,b)=>a+b.protein,0)/dates.length)+'g':'0g';daysLogged.textContent=dates.length;if(state.weights.length>1){let a=state.weights[0],b=state.weights.at(-1),days=Math.max(1,(new Date(b.date)-new Date(a.date))/86400000),p=(b.weight-a.weight)/days*7;weekPace.textContent=(p>=0?'+':'')+p.toFixed(2)+' kg/wk';paceStatus.textContent=p>=.15&&p<=.30?'On target pace':p<.15?'Below target pace':'Above target pace'}else{weekPace.textContent='—';paceStatus.textContent='Build consistency first'}}
+function fillSettings(){let s=state.settings;setCal.value=s.cal;setPro.value=s.protein;setCarbs.value=s.carbs;setFat.value=s.fat;setStart.value=s.start;setGoal.value=s.goal;apiKey.value=s.apiKey||'DEMO_KEY';firebaseConfigInput.value=state.firebase.config?JSON.stringify(state.firebase.config,null,2):'';updateSyncUI()}function saveTargets(){Object.assign(state.settings,{cal:+setCal.value,protein:+setPro.value,carbs:+setCarbs.value,fat:+setFat.value,start:+setStart.value,goal:+setGoal.value});save()}function saveKey(){state.settings.apiKey=apiKey.value.trim()||'DEMO_KEY';save()}function exportData(){let b=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='gaintrack-backup-'+DATE()+'.json';a.click();URL.revokeObjectURL(a.href)}function importData(e){let f=e.target.files[0];if(!f)return;let r=new FileReader();r.onload=()=>{try{state=JSON.parse(r.result);save();alert('Backup imported')}catch{alert('Invalid GainTrack backup')}};r.readAsText(f)}function esc(s){return String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}searchInput.addEventListener('keydown',e=>{if(e.key==='Enter')searchFood()});
+let fb={app:null,auth:null,db:null,mods:null,user:null};function updateSyncUI(msg){const configured=!!state.firebase.config;const signed=!!state.firebase.user;syncDot.className='syncdot '+(signed?'online':configured?'warn':'');syncText.textContent=signed?'Cloud synced':configured?'Firebase ready':'Local only';firebaseStatus.textContent=msg||(signed?`Signed in as ${state.firebase.user.email||'user'}${state.firebase.lastSync?' • Last sync '+new Date(state.firebase.lastSync).toLocaleString():''}`:configured?'Firebase configured. Sign in to start cross-device sync.':'GainTrack Firebase project is configured. Google Sign-In and Firestore are ready.')}async function loadFirebaseModules(){if(fb.mods)return fb.mods;fb.mods=await Promise.all([import('https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js'),import('https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js'),import('https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js')]);return fb.mods}async function initFirebase(){if(!state.firebase.config)return false;try{const [appM,authM,fsM]=await loadFirebaseModules();if(!fb.app){fb.app=appM.initializeApp(state.firebase.config);fb.auth=authM.getAuth(fb.app);fb.db=fsM.initializeFirestore(fb.app,{localCache:fsM.persistentLocalCache({tabManager:fsM.persistentMultipleTabManager()})});authM.onAuthStateChanged(fb.auth,user=>{fb.user=user||null;state.firebase.user=user?{uid:user.uid,email:user.email}:null;localStorage.setItem('gaintrack-v3',JSON.stringify(state));updateSyncUI();if(user)pullCloud()})}return true}catch(e){syncDot.className='syncdot error';updateSyncUI('Firebase error: '+e.message);return false}}function saveFirebaseConfig(){try{const cfg=JSON.parse(firebaseConfigInput.value.trim());if(!cfg.apiKey||!cfg.projectId||!cfg.appId)throw new Error('apiKey, projectId and appId are required');state.firebase.config=cfg;localStorage.setItem('gaintrack-v3',JSON.stringify(state));updateSyncUI('Firebase config saved. Reload the page once, then create an account or sign in.');alert('Firebase config saved. Reload GainTrack once before signing in.')}catch(e){firebaseStatus.textContent='Invalid config: '+e.message}}async function firebaseGoogleSignIn(){if(!await initFirebase())return;try{const [,authM]=fb.mods;const provider=new authM.GoogleAuthProvider();provider.setCustomParameters({prompt:'select_account'});await authM.signInWithPopup(fb.auth,provider);updateSyncUI('Signed in with Google. Loading your cloud data…')}catch(e){if(e.code==='auth/popup-blocked'||e.code==='auth/cancelled-popup-request'){try{const [,authM]=fb.mods;const provider=new authM.GoogleAuthProvider();provider.setCustomParameters({prompt:'select_account'});await authM.signInWithRedirect(fb.auth,provider)}catch(err){updateSyncUI('Google sign-in failed: '+err.message)}}else{updateSyncUI('Google sign-in failed: '+e.message)}}}async function firebaseSignOut(){if(!await initFirebase())return;try{const [,authM]=fb.mods;await authM.signOut(fb.auth);state.firebase.user=null;localStorage.setItem('gaintrack-v3',JSON.stringify(state));updateSyncUI('Signed out. Local tracking continues.')}catch(e){updateSyncUI('Sign-out failed: '+e.message)}}async function pushCloud(){if(!fb.user||!fb.db)return;const fsM=fb.mods[2];const cloudData=JSON.parse(JSON.stringify(state));delete cloudData.firebase.config;cloudData.firebase={user:{uid:fb.user.uid,email:fb.user.email},lastSync:Date.now()};await fsM.setDoc(fsM.doc(fb.db,'users',fb.user.uid,'gaintrack','state'),cloudData,{merge:false});state.firebase.lastSync=Date.now();localStorage.setItem('gaintrack-v3',JSON.stringify(state));updateSyncUI('Cloud sync complete.')}async function pullCloud(){if(!fb.user||!fb.db)return;try{const fsM=fb.mods[2];const snap=await fsM.getDoc(fsM.doc(fb.db,'users',fb.user.uid,'gaintrack','state'));if(snap.exists()){const cloud=snap.data();const cfg=state.firebase.config;state={...cloud,firebase:{...(cloud.firebase||{}),config:cfg,user:{uid:fb.user.uid,email:fb.user.email},lastSync:Date.now()}};if(!state.cachedFoods)state.cachedFoods=[];localStorage.setItem('gaintrack-v3',JSON.stringify(state));render();renderCalendar();updateSyncUI('Cloud data loaded.')}else{await pushCloud()}}catch(e){updateSyncUI('Cloud load failed: '+e.message)}}async function syncNow(){if(!await initFirebase())return;if(!fb.user){updateSyncUI('Sign in first to sync.');return}try{await pushCloud()}catch(e){updateSyncUI('Sync failed: '+e.message)}}window.addEventListener('online',()=>{if(state.firebase.user)syncNow()});render();renderCalendar();if(state.firebase.config)initFirebase();
 </script></body></html>
